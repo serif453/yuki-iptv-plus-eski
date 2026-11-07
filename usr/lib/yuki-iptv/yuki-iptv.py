@@ -57,9 +57,11 @@ from yuki_iptv.record import (
     record,
     record_return,
     stop_record,
+    stop_process,
     is_ffmpeg_recording,
     init_record,
 )
+from yuki_iptv.record_mpv import MpvRecorder
 from yuki_iptv.menubar import (
     init_yuki_iptv_menubar,
     init_menubar_player,
@@ -1776,11 +1778,11 @@ if __name__ == "__main__":
                 ch_name,
             ]
 
-        def do_stop_record(name2):
+        def do_stop_record(name2, wait=False):
             if name2 in sch_recordings:
                 ffmpeg_process = sch_recordings[name2][0]
                 if ffmpeg_process:
-                    ffmpeg_process.terminate()
+                    stop_process(ffmpeg_process, wait)
 
         recViaScheduler = False
 
@@ -2466,6 +2468,9 @@ if __name__ == "__main__":
 
         def mpv_override_play(arg_override_play, channel_name1=""):
             global event_handler
+            if mpv_recorder:
+                # Close the record file before loading, see MpvRecorder
+                mpv_recorder.before_load(arg_override_play)
             on_before_play()
             useragent_ref, referer_ref = get_ua_ref_for_channel(channel_name1)
             player.user_agent = useragent_ref
@@ -6372,19 +6377,47 @@ if __name__ == "__main__":
                         )
                     )
                 record_file = out_file
-                record(
-                    url3,
-                    out_file,
-                    orig_channel_name,
-                    f"Referer: {settings['referer']}",
-                    get_ua_ref_for_channel,
-                )
+                # Record the playing channel through the player's own
+                # connection (no second connection to the provider)
+                if (
+                    mpv_recorder
+                    and url3 == playing_url
+                    and mpv_recorder.start(out_file, url3)
+                ):
+                    logger.info("Recording playing channel via mpv stream-record")
+                else:
+                    record(
+                        url3,
+                        out_file,
+                        orig_channel_name,
+                        f"Referer: {settings['referer']}",
+                        get_ua_ref_for_channel,
+                    )
             else:
-                is_recording = False
-                recording_time = 0
-                stop_record()
-                lbl2.setText("")
-                lbl2.hide()
+                if mpv_recorder and mpv_recorder.is_recording:
+                    mpv_recorder.stop()
+                else:
+                    stop_record()
+                reset_record_ui()
+
+        def reset_record_ui():
+            global is_recording, recording_time
+            is_recording = False
+            recording_time = 0
+            lbl2.setText("")
+            lbl2.hide()
+
+        def mpv_record_stopped():
+            # Recording ended by itself (channel changed / stalled)
+            global time_stop
+            reset_record_ui()
+            time_stop = time.time() + 3
+            l1.show()
+            l1.setText2(_("Recording stopped"))
+
+        def mpv_record_file_changed(new_file):
+            global record_file
+            record_file = new_file
 
         def do_record():
             global time_stop
@@ -6496,6 +6529,7 @@ if __name__ == "__main__":
         logger.info(f"Using mpv options: {json.dumps(options)}")
 
         player = None
+        mpv_recorder = None
 
         QT_URL = "<a href='https://www.qt.io/'>https://www.qt.io/</a>"
         MPV_URL = "<a href='https://mpv.io/'>mpv</a> "
@@ -6747,8 +6781,14 @@ if __name__ == "__main__":
                     mpv_stop()
 
         @idle_function
+        @idle_function
+        def mpv_recorder_file_loaded(unused=None):
+            if mpv_recorder:
+                mpv_recorder.on_file_loaded()
+
         def file_loaded_callback(unused=None):
             global playing_chan
+            mpv_recorder_file_loaded()
             if playing_chan:
                 redraw_menubar()
 
@@ -7423,9 +7463,11 @@ if __name__ == "__main__":
                 pass
             save_player_tracks()
             saveLastChannel()
-            stop_record()
+            if mpv_recorder:
+                mpv_recorder.stop()
+            stop_record(wait=True)
             for rec_1 in sch_recordings:
-                do_stop_record(rec_1)
+                do_stop_record(rec_1, wait=True)
             if mpris_loop:
                 mpris_loop.quit()
             stopped = True
@@ -8324,6 +8366,12 @@ if __name__ == "__main__":
         if settings["m3u"] and m3u:
             win.show()
             aot_action = init_mpv_player()
+            mpv_recorder = MpvRecorder(
+                player,
+                show_exception,
+                on_stopped=mpv_record_stopped,
+                on_file_changed=mpv_record_file_changed,
+            )
             win.raise_()
             win.setFocus(QtCore.Qt.FocusReason.PopupFocusReason)
             win.activateWindow()
