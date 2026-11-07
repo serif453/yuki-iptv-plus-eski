@@ -1154,7 +1154,18 @@ class MPV(object):
 
     def loadfile(self, filename, mode='replace', **options):
         """Mapped mpv loadfile command, see man mpv(1)."""
-        self.command('loadfile', filename.encode(fs_enc), mode, MPV._encode_options(options))
+        filename = filename.encode(fs_enc)
+        if not options:
+            # Works with every mpv version
+            self.command('loadfile', filename, mode)
+            return
+        # mpv 0.38 added an "index" argument before the options:
+        #   loadfile <url> [<flags> [<index> [<options>]]]
+        # Older versions take the options as the third argument.
+        try:
+            self.command('loadfile', filename, mode, -1, MPV._encode_options(options))
+        except ValueError:
+            self.command('loadfile', filename, mode, MPV._encode_options(options))
 
     def loadlist(self, playlist, mode='replace'):
         """Mapped mpv loadlist command, see man mpv(1)."""
