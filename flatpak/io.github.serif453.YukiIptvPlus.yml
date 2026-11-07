@@ -145,8 +145,12 @@ modules:
       - cp -r usr/lib/yuki-iptv ${FLATPAK_DEST}/lib/
       - cp -r usr/share/yuki-iptv usr/share/locale ${FLATPAK_DEST}/share/
       - install -Dm755 usr/bin/yuki-iptv ${FLATPAK_DEST}/bin/yuki-iptv
-      - install -Dm644 usr/share/icons/hicolor/scalable/apps/yuki-iptv.svg
-        ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+      # Flatpak requires a square icon; the original is 640x512, so pad
+      # the viewBox vertically to 640x640 (the picture stays centered)
+      - mkdir -p ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps
+      - sed 's/viewBox="0 0 640 512"/viewBox="0 -64 640 640"/'
+        usr/share/icons/hicolor/scalable/apps/yuki-iptv.svg
+        > ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
       - install -Dm644 usr/share/applications/yuki-iptv.desktop
         ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
       - desktop-file-edit --set-icon=${FLATPAK_ID} --set-name="yuki-iptv plus"
