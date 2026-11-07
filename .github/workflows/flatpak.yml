@@ -2,10 +2,15 @@ name: Flatpak
 
 on:
   push:
-    branches: ["**"]
+    branches: [master]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+# A newer push cancels the build still running for the same branch
+concurrency:
+  group: flatpak-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   flatpak:
