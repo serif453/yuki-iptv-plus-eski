@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2021, 2022 Astroncia <kestraly@gmail.com> -->
+<!-- Copyright 2023 yuki-chan-nya <yukichandev@proton.me> -->
+<!-- Copyright 2026 serif453 -->
+<component type="desktop-application">
+  <id>io.github.serif453.YukiIptvPlus</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>yuki-iptv plus</name>
+  <summary>IPTV player with EPG support</summary>
+
+  <description>
+    <p>
+      IPTV player with EPG support. Fork of yuki-iptv with fixes for
+      stream recording and recording while watching over a single connection.
+    </p>
+    <ul>
+      <li>M3U / M3U8 / XSPF playlists and XTream API</li>
+      <li>TV programme (EPG) in XMLTV and JTV formats</li>
+      <li>Stream recording and scheduled recording</li>
+      <li>Record the channel you are watching without opening a second connection</li>
+      <li>Per-channel video settings, user agent and HTTP referer</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.serif453.YukiIptvPlus.desktop</launchable>
+
+  <url type="homepage">https://github.com/serif453/yuki-iptv-plus</url>
+  <url type="bugtracker">https://github.com/serif453/yuki-iptv-plus/issues</url>
+  <developer id="io.github.serif453">
+    <name>serif453</name>
+  </developer>
+
+  <content_rating type="oars-1.1"/>
+  <translation type="gettext">yuki-iptv</translation>
+
+  <releases>
+    <release version="0.0.5-plus1" date="2026-11-07">
+      <description>
+        <p>Recording fixes and recording while watching over a single connection.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -6,6 +6,17 @@
 ⚠️ Disclaimer: yuki-iptv doesn't provide any playlists or other digital content.  
 The channels and pictures in the screenshots are for demonstration purposes only.
 
+## Flatpak (yuki-iptv plus)
+
+Download `yuki-iptv-plus.flatpak` from [Releases](https://github.com/serif453/yuki-iptv-plus/releases)
+(or from the latest [Actions](https://github.com/serif453/yuki-iptv-plus/actions) run) and install it:
+
+```bash
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user yuki-iptv-plus.flatpak
+flatpak run io.github.serif453.YukiIptvPlus
+```
+
 ## Download
 pip install pillow (en manjaro linux instalar esta dependencia)
 [.deb packages](https://github.com/yuki-iptv/yuki-iptv/releases)

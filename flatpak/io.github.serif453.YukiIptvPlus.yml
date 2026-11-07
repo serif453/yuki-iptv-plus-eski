@@ -1,0 +1,163 @@
+app-id: io.github.serif453.YukiIptvPlus
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+# PyQt6 comes from the PyQt BaseApp, built for the same KDE runtime
+base: com.riverbankcomputing.PyQt.BaseApp
+base-version: '6.10'
+command: yuki-iptv
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  # mpv is embedded into the Qt window by window id, which needs X11
+  # (the launcher script forces QT_QPA_PLATFORM=xcb on Wayland as well)
+  - --socket=x11
+  - --socket=pulseaudio
+  - --device=dri
+  # Settings, playlists, EPG cache and default recordings folder
+  # (shared with a native installation of yuki-iptv)
+  - --filesystem=~/.config/yuki-iptv:create
+  # Common places to choose as the recordings folder
+  - --filesystem=xdg-videos
+  - --filesystem=xdg-download
+  # MPRIS (media keys, desktop media controls)
+  - --own-name=org.mpris.MediaPlayer2.*
+  # Prevent the screen from going to sleep while watching
+  - --talk-name=org.freedesktop.ScreenSaver
+
+build-options:
+  env:
+    BASEAPP_REMOVE_WEBENGINE: '1'
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/pkgconfig
+  - /share/man
+  - /share/doc
+  - '*.a'
+  - '*.la'
+
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh
+
+modules:
+  # ffmpeg: libraries for mpv and the ffmpeg command used for recording.
+  # The runtime's own ffmpeg lacks many codecs used by IPTV streams.
+  - name: ffmpeg
+    config-opts:
+      - --enable-gpl
+      - --enable-version3
+      - --enable-shared
+      - --disable-static
+      - --disable-doc
+      - --disable-debug
+      - --disable-ffplay
+      - --enable-gnutls
+      - --enable-libdrm
+      - --enable-vaapi
+    cleanup:
+      - /share/ffmpeg
+    sources:
+      - type: git
+        url: https://github.com/FFmpeg/FFmpeg.git
+        tag: n7.1.5
+        commit: 3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587
+
+  - name: libass
+    config-opts:
+      - --disable-static
+    sources:
+      - type: archive
+        url: https://github.com/libass/libass/releases/download/0.17.4/libass-0.17.4.tar.xz
+        sha256: 78f1179b838d025e9c26e8fef33f8092f65611444ffa1bfc0cfac6a33511a05a
+
+  # jinja2 is needed by libplacebo's build (OpenGL loader generator)
+  - name: python-build-deps
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - python3 -m pip install --prefix=${FLATPAK_DEST} --no-cache-dir
+        'jinja2>=3.1,<4'
+    cleanup:
+      - '*'
+
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Dvulkan=disabled
+      - -Dd3d11=disabled
+      - -Ddemos=false
+      - -Dtests=false
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+
+  # libmpv only, the player itself is yuki-iptv
+  - name: mpv
+    buildsystem: meson
+    config-opts:
+      - -Dlibmpv=true
+      - -Dcplayer=false
+      - -Dlua=disabled
+      - -Djavascript=disabled
+      - -Dmanpage-build=disabled
+      - -Dhtml-build=disabled
+      - -Dpdf-build=disabled
+      - -Dvulkan=disabled
+      - -Dlibbluray=disabled
+      - -Ddvdnav=disabled
+      - -Dcdda=disabled
+    sources:
+      - type: git
+        url: https://github.com/mpv-player/mpv.git
+        tag: v0.42.0
+        commit: b0841e8c4d156b8403dc1876c4cbd9011eb583f3
+
+  # Python libraries from debian/control. Installed with pip during the
+  # build (needs network). Fine for GitHub builds, not allowed on Flathub.
+  - name: python-deps
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - python3 -m pip install --prefix=${FLATPAK_DEST} --no-cache-dir
+        'requests>=2.31,<3'
+        'chardet>=5,<6'
+        'setproctitle>=1.3,<2'
+        'Pillow>=10,<13'
+        'Unidecode>=1.3,<2'
+        'pydbus==0.6.0'
+        'PyGObject==3.50.0'
+
+  - name: yuki-iptv
+    buildsystem: simple
+    build-commands:
+      # Translations (.mo files)
+      - make
+      - mkdir -p ${FLATPAK_DEST}/lib ${FLATPAK_DEST}/share
+      - cp -r usr/lib/yuki-iptv ${FLATPAK_DEST}/lib/
+      - cp -r usr/share/yuki-iptv usr/share/locale ${FLATPAK_DEST}/share/
+      - install -Dm755 usr/bin/yuki-iptv ${FLATPAK_DEST}/bin/yuki-iptv
+      - install -Dm644 usr/share/icons/hicolor/scalable/apps/yuki-iptv.svg
+        ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+      - install -Dm644 usr/share/applications/yuki-iptv.desktop
+        ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
+      - desktop-file-edit --set-icon=${FLATPAK_ID} --set-name="yuki-iptv plus"
+        ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
+      - install -Dm644 flatpak/${FLATPAK_ID}.metainfo.xml
+        ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          - .git
+          - .flatpak-builder
+          - flatpak_app
+          - repo
