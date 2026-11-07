@@ -98,12 +98,27 @@ modules:
         tag: v7.387.0
         commit: 275f7dea27924cdd34ab2e6c20e448b6bc4fab65
 
+  # Required by mpv's X11 support and missing from the KDE runtime.
+  # Without it mpv is built without X11 and cannot draw into the
+  # yuki-iptv window (audio only, no picture).
+  - name: libXpresent
+    config-opts:
+      - --disable-static
+    sources:
+      - type: archive
+        url: https://xorg.freedesktop.org/archive/individual/lib/libXpresent-1.0.1.tar.xz
+        sha256: b964df9e5a066daa5e08d2dc82692c57ca27d00b8cc257e8e960c9f1cf26231b
+
   # libmpv only, the player itself is yuki-iptv
   - name: mpv
     buildsystem: meson
     config-opts:
       - -Dlibmpv=true
       - -Dcplayer=false
+      # yuki-iptv embeds the video into its X11 window: fail the build
+      # instead of silently producing an audio-only libmpv
+      - -Dx11=enabled
+      - -Degl-x11=enabled
       - -Dlua=disabled
       - -Djavascript=disabled
       - -Dmanpage-build=disabled
