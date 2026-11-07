@@ -1,6 +1,7 @@
 #
 # Copyright (c) 2021, 2022 Astroncia <kestraly@gmail.com>
 # Copyright (c) 2023 yuki-chan-nya <yukichandev@proton.me>
+# Copyright (c) 2026 serif453
 #
 # This file is part of yuki-iptv.
 #
@@ -23,6 +24,7 @@
 #
 import logging
 import gettext
+import functools
 from yuki_iptv.qt import get_qt_library
 
 qt_library, QtWidgets, QtCore, QtGui, QShortcut = get_qt_library()
@@ -30,99 +32,112 @@ qt_library, QtWidgets, QtCore, QtGui, QShortcut = get_qt_library()
 logger = logging.getLogger(__name__)
 _ = gettext.gettext
 
+# Time to wait for ffmpeg to finish gracefully after sending "q" (ms)
+GRACEFUL_STOP_TIMEOUT = 5000
+
 
 class YukiData:
     ffmpeg_proc = None
     ffmpeg_processes = None
     show_record_exception = None
+    # id() of processes stopped by the user, their exit is not an error
+    stopped_by_user = set()
 
 
 def is_ffmpeg_recording():
-    ret = -2
-    if YukiData.ffmpeg_proc:
-        if YukiData.ffmpeg_proc.processId() == 0:
-            YukiData.ffmpeg_proc = None
-            ret = True
-        else:
-            ret = False
-    return ret
+    """Returns False while the manual recording process is running,
+    True once it has finished, None if there is no process.
+    (Inverted semantics kept for compatibility with callers.)"""
+    if YukiData.ffmpeg_proc is None:
+        return None
+    if YukiData.ffmpeg_proc.processId() == 0:
+        YukiData.ffmpeg_proc = None
+        return True
+    return False
 
 
-def exit_handler(exit_code, exit_status):
-    if exit_status != QtCore.QProcess.ExitStatus.NormalExit:
-        logger.warning("ffmpeg process crashed")
-        ffmpeg_process_found = False
+def _read_tail(data, lines=15):
+    try:
+        text = bytes(data).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    return "\n".join(text.split("\n")[-lines:])
+
+
+def exit_handler(proc, exit_code, exit_status):
+    stopped_by_user = id(proc) in YukiData.stopped_by_user
+    YukiData.stopped_by_user.discard(id(proc))
+
+    crashed = exit_status != QtCore.QProcess.ExitStatus.NormalExit
+    if stopped_by_user or (not crashed and exit_code == 0):
+        logger.info(f"ffmpeg finished (exit code {exit_code})")
+        return
+
+    # ffmpeg exits normally with a non-zero code on connection errors,
+    # HTTP 403/404, invalid URL etc. - these must be reported too
+    logger.warning(f"ffmpeg failed (exit code {exit_code}, crashed: {crashed})")
+    if not YukiData.show_record_exception:
+        return
+    try:
+        standard_output = _read_tail(proc.readAllStandardOutput())
+        standard_error = _read_tail(proc.readAllStandardError())
+        YukiData.show_record_exception(
+            (_("ffmpeg crashed!") if crashed else _("Recording failed!"))
+            + "\n"
+            + _("exit code:")
+            + " "
+            + str(exit_code)
+            + "\nstdout:\n"
+            + standard_output
+            + "\nstderr:\n"
+            + standard_error
+        )
+    except Exception:
+        logger.exception("Failed to show ffmpeg error")
+        YukiData.show_record_exception(_("ffmpeg crashed!"))
+
+
+def error_handler(proc, error):
+    if error == QtCore.QProcess.ProcessError.FailedToStart:
+        # finished signal is not emitted in this case
+        logger.error("ffmpeg failed to start")
         if YukiData.show_record_exception:
-            try:
-                if (
-                    YukiData.ffmpeg_proc
-                    and YukiData.ffmpeg_proc.processId() == 0
-                    and YukiData.ffmpeg_proc.exitCode() == exit_code
-                    and YukiData.ffmpeg_proc.exitStatus() == exit_status
-                ):
-                    standard_output = YukiData.ffmpeg_proc.readAllStandardOutput()
-                    try:
-                        standard_output = bytes(standard_output).decode("utf-8")
-                        standard_output = "\n".join(standard_output.split("\n")[-15:])
-                    except Exception:
-                        pass
-                    standard_error = YukiData.ffmpeg_proc.readAllStandardError()
-                    try:
-                        standard_error = bytes(standard_error).decode("utf-8")
-                        standard_error = "\n".join(standard_error.split("\n")[-15:])
-                    except Exception:
-                        pass
-                    ffmpeg_process_found = True
-                    YukiData.show_record_exception(
-                        _("ffmpeg crashed!") + "\n"
-                        "" + _("exit code:") + " " + str(exit_code) + ""
-                        "\nstdout:\n" + str(standard_output) + ""
-                        "\nstderr:\n" + str(standard_error)
-                    )
-                else:
-                    if YukiData.ffmpeg_processes:
-                        for ffmpeg_process in YukiData.ffmpeg_processes:
-                            if (
-                                ffmpeg_process
-                                and ffmpeg_process.processId() == 0
-                                and ffmpeg_process[0].exitCode() == exit_code
-                                and ffmpeg_process[0].exitStatus() == exit_status
-                            ):
-                                standard_output = ffmpeg_process[
-                                    0
-                                ].readAllStandardOutput()
-                                try:
-                                    standard_output = bytes(standard_output).decode(
-                                        "utf-8"
-                                    )
-                                    standard_output = "\n".join(
-                                        standard_output.split("\n")[-15:]
-                                    )
-                                except Exception:
-                                    pass
-                                standard_error = ffmpeg_process[
-                                    0
-                                ].readAllStandardError()
-                                try:
-                                    standard_error = bytes(standard_error).decode(
-                                        "utf-8"
-                                    )
-                                    standard_error = "\n".join(
-                                        standard_error.split("\n")[-15:]
-                                    )
-                                except Exception:
-                                    pass
-                                ffmpeg_process_found = True
-                                YukiData.show_record_exception(
-                                    _("ffmpeg crashed!") + "\n"
-                                    "" + _("exit code:") + " " + str(exit_code) + ""
-                                    "\nstdout:\n" + str(standard_output) + ""
-                                    "\nstderr:\n" + str(standard_error)
-                                )
-            except Exception:
-                pass
-            if not ffmpeg_process_found:
-                YukiData.show_record_exception(_("ffmpeg crashed!"))
+            YukiData.show_record_exception(
+                _("ffmpeg could not be started!")
+                + "\n"
+                + _("Make sure ffmpeg is installed and available in PATH.")
+            )
+
+
+def build_ffmpeg_args(input_url, out_file, user_agent, http_referer):
+    arr = ["-nostats", "-hide_banner", "-loglevel", "warning"]
+    if input_url.startswith("http://") or input_url.startswith("https://"):
+        if user_agent:
+            arr += ["-user_agent", user_agent]
+        if http_referer:
+            # ffmpeg expects every header line to end with CRLF
+            arr += ["-headers", http_referer + "\r\n"]
+    arr += [
+        "-i",
+        input_url,
+        # Select all streams first, otherwise the negative maps below
+        # have no effect and only one audio track is recorded
+        "-map",
+        "0",
+        "-map",
+        "-0:s?",
+        "-map",
+        "-0:d?",
+        "-sn",
+        "-codec",
+        "copy",
+        "-acodec",
+        "aac",
+        "-max_muxing_queue_size",
+        "4096",
+        out_file,
+    ]
+    return arr
 
 
 def record(
@@ -141,61 +156,24 @@ def record(
         http_referer = f"Referer: {referer_ref}"
     logger.info(f"Using user agent '{user_agent}' for record channel '{channel_name}'")
     logger.info(f"HTTP headers: '{http_referer}'")
-    if input_url.startswith("http://") or input_url.startswith("https://"):
-        arr = [
-            "-nostats",
-            "-hide_banner",
-            "-loglevel",
-            "warning",
-            "-user_agent",
-            user_agent,
-            "-headers",
-            http_referer,
-            "-i",
-            input_url,
-            "-map",
-            "-0:s?",
-            "-sn",
-            "-map",
-            "-0:d?",
-            "-codec",
-            "copy",
-            "-acodec",
-            "aac",
-            "-max_muxing_queue_size",
-            "4096",
-            out_file,
-        ]
-    else:
-        arr = [
-            "-nostats",
-            "-hide_banner",
-            "-loglevel",
-            "warning",
-            "-i",
-            input_url,
-            "-map",
-            "-0:s?",
-            "-sn",
-            "-map",
-            "-0:d?",
-            "-codec",
-            "copy",
-            "-acodec",
-            "aac",
-            "-max_muxing_queue_size",
-            "4096",
-            out_file,
-        ]
+
+    arr = build_ffmpeg_args(input_url, out_file, user_agent, http_referer)
+
+    proc = QtCore.QProcess()
+    # Connect signals before starting the process
+    proc.finished.connect(functools.partial(exit_handler, proc))
+    proc.errorOccurred.connect(functools.partial(error_handler, proc))
+
     if not is_return:
-        YukiData.ffmpeg_proc = QtCore.QProcess()
-        YukiData.ffmpeg_proc.start("ffmpeg", arr)
-        YukiData.ffmpeg_proc.finished.connect(exit_handler)
-    else:
-        ffmpeg_ret_proc = QtCore.QProcess()
-        ffmpeg_ret_proc.start("ffmpeg", arr)
-        ffmpeg_ret_proc.finished.connect(exit_handler)
-        return ffmpeg_ret_proc
+        # Do not lose the reference to a still running recording
+        if YukiData.ffmpeg_proc and YukiData.ffmpeg_proc.processId() != 0:
+            stop_process(YukiData.ffmpeg_proc)
+        YukiData.ffmpeg_proc = proc
+
+    proc.start("ffmpeg", arr)
+
+    if is_return:
+        return proc
 
 
 def record_return(
@@ -206,9 +184,47 @@ def record_return(
     )
 
 
-def stop_record():
+def stop_process(proc, wait=False):
+    """Stops ffmpeg gracefully so the output file is finalized.
+
+    wait=True blocks until ffmpeg exits (used on application exit,
+    when timers would never fire).
+
+    QProcess.terminate() does nothing for console applications on Windows,
+    so "q" is sent to ffmpeg's stdin first; the process is killed only if
+    it does not exit in time.
+    """
+    if not proc or proc.processId() == 0:
+        return
+    YukiData.stopped_by_user.add(id(proc))
+    try:
+        proc.write(b"q")
+        proc.closeWriteChannel()
+    except Exception:
+        logger.exception("Failed to send 'q' to ffmpeg")
+
+    if wait:
+        if not proc.waitForFinished(GRACEFUL_STOP_TIMEOUT):
+            proc.terminate()
+            if not proc.waitForFinished(GRACEFUL_STOP_TIMEOUT):
+                proc.kill()
+        return
+
+    def force_stop():
+        if proc.processId() != 0:
+            logger.warning("ffmpeg did not exit in time, terminating")
+            proc.terminate()
+            QtCore.QTimer.singleShot(
+                GRACEFUL_STOP_TIMEOUT,
+                lambda: proc.kill() if proc.processId() != 0 else None,
+            )
+
+    QtCore.QTimer.singleShot(GRACEFUL_STOP_TIMEOUT, force_stop)
+
+
+def stop_record(wait=False):
     if YukiData.ffmpeg_proc:
-        YukiData.ffmpeg_proc.terminate()
+        stop_process(YukiData.ffmpeg_proc, wait)
 
 
 def init_record(show_exception, ffmpeg_processes):

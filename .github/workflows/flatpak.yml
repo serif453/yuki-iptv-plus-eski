@@ -1,0 +1,40 @@
+name: Flatpak
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push cancels the build still running for the same branch
+concurrency:
+  group: flatpak-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flatpak:
+    name: Build Flatpak
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: yuki-iptv-plus.flatpak
+          manifest-path: flatpak/io.github.serif453.YukiIptvPlus.yml
+          arch: x86_64
+          cache-key: flatpak-builder-${{ hashFiles('flatpak/*.yml') }}
+
+      # On a "v*" tag, attach the bundle to a GitHub release
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: yuki-iptv-plus.flatpak
+          generate_release_notes: true
